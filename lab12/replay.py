@@ -122,7 +122,45 @@ def compare_with_tol(golden, new, atol=1e-3, rtol=1e-3):
     #   * |golden|. Hai NaN ở cùng vị trí coi là bằng nhau. Trả dict có đúng các khoá: segments,
     #   differ_beyond_tol, not_bit_identical (số đoạn không giống TỪNG BIT), max_abs_diff, atol, rtol,
     #   differing_segments (tối đa 20 chỉ số đầu, dạng list).
-    raise NotImplementedError("TODO compare_with_tol: xem GUIDE.md, Bước 1")
+    golden = np.asarray(golden)
+    new = np.asarray(new)
+    if golden.shape != new.shape:
+        raise ValueError(f"shape mismatch: {golden.shape} != {new.shape}")
+    if golden.ndim == 1:
+        golden, new = golden[None, :], new[None, :]
+    if golden.ndim != 2:
+        raise ValueError("expected arrays with shape (segments, steps)")
+
+    equal = np.isclose(golden, new, atol=atol, rtol=rtol, equal_nan=True)
+    differing = ~np.all(equal, axis=1)
+    bit_equal = []
+    for old_row, new_row in zip(golden, new):
+        if old_row.dtype != new_row.dtype:
+            bit_equal.append(False)
+            continue
+        both_nan = np.isnan(old_row) & np.isnan(new_row)
+        old_bits = np.ascontiguousarray(old_row.copy())
+        new_bits = np.ascontiguousarray(new_row.copy())
+        old_bits[both_nan] = 0
+        new_bits[both_nan] = 0
+        bit_equal.append(np.array_equal(old_bits.view(np.uint8), new_bits.view(np.uint8)))
+
+    with np.errstate(invalid="ignore"):
+        abs_diff = np.abs(golden.astype(np.float64) - new.astype(np.float64))
+    abs_diff[np.isnan(golden) & np.isnan(new)] = 0.0
+    abs_diff[np.isnan(golden) ^ np.isnan(new)] = np.inf
+    abs_diff[np.isinf(golden) & np.isinf(new) & (golden == new)] = 0.0
+    max_abs_diff = float(np.max(abs_diff)) if abs_diff.size else 0.0
+    differing_segments = np.flatnonzero(differing)
+    return {
+        "segments": int(golden.shape[0]),
+        "differ_beyond_tol": int(differing.sum()),
+        "not_bit_identical": int((~np.asarray(bit_equal, dtype=bool)).sum()),
+        "max_abs_diff": max_abs_diff,
+        "atol": float(atol),
+        "rtol": float(rtol),
+        "differing_segments": differing_segments[:20].tolist(),
+    }
 
 
 def summation_order_demo(n=1_000_000, seed=0):
